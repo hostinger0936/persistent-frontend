@@ -199,7 +199,6 @@ const DeviceCard = memo(function DeviceCard({
   onCheckOnline,
   onDelete,
 }: DeviceCardProps) {
-  // ── CHANGED: use reachability instead of online boolean ──
   const pillClasses = getReachabilityPillClasses(device.reachability);
   const statusLabel = getReachabilityLabel(device.reachability);
 
@@ -341,6 +340,46 @@ export default function DevicesPage() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 18 });
 
+  // Stable ordering:
+  // - existing devices keep their original position forever
+  // - newly discovered devices are pinned at the top
+  // - reachability changes never affect order
+  const stableOrderRef = useRef<Record<string, number>>({});
+  const nextTopOrderRef = useRef(-1);
+  const nextBottomOrderRef = useRef(0);
+
+  const ensureBottomOrderForList = useCallback((list: Row[]) => {
+    for (const item of list) {
+      const id = safeStr(item.deviceId);
+      if (!id) continue;
+      if (stableOrderRef.current[id] != null) continue;
+
+      stableOrderRef.current[id] = nextBottomOrderRef.current;
+      nextBottomOrderRef.current += 1;
+    }
+  }, []);
+
+  const ensureTopOrderForDevice = useCallback((deviceId: string) => {
+    const id = safeStr(deviceId);
+    if (!id) return;
+    if (stableOrderRef.current[id] != null) return;
+
+    stableOrderRef.current[id] = nextTopOrderRef.current;
+    nextTopOrderRef.current -= 1;
+  }, []);
+
+  const removeStableOrderForDevice = useCallback((deviceId: string) => {
+    const id = safeStr(deviceId);
+    if (!id) return;
+    delete stableOrderRef.current[id];
+  }, []);
+
+  const getStableOrder = useCallback((deviceId: string) => {
+    const id = safeStr(deviceId);
+    const value = stableOrderRef.current[id];
+    return typeof value === "number" ? value : Number.MAX_SAFE_INTEGER;
+  }, []);
+
   const loadFormsLatestByDevice = useCallback(async (): Promise<Record<string, FormSubmission>> => {
     try {
       const res = await axios.get(`${ENV.API_BASE}/api/form_submissions`, {
@@ -414,6 +453,8 @@ export default function DevicesPage() {
         const safeFav = favMap || {};
         const normalized = mergeDevices(list || [], safeFav);
 
+        ensureBottomOrderForList(normalized);
+
         setDevices(normalized);
         setFavoritesMap(safeFav);
         favoritesRef.current = safeFav;
@@ -432,7 +473,7 @@ export default function DevicesPage() {
         if (!silent) setLoading(false);
       }
     },
-    [loadFormsLatestByDevice, mergeDevices],
+    [ensureBottomOrderForList, loadFormsLatestByDevice, mergeDevices],
   );
 
   const loadDeletePasswordStatus = useCallback(async () => {
@@ -497,7 +538,6 @@ export default function DevicesPage() {
       try {
         if (!msg || msg.type !== "event") return;
 
-        // ── CHANGED: handle device:lastSeen + device:upsert events ──
         if (msg.event === "device:lastSeen" || msg.event === "device:upsert") {
           const did = safeStr(msg.deviceId || msg?.data?.deviceId);
           if (!did) return;
@@ -511,6 +551,8 @@ export default function DevicesPage() {
             const index = prev.findIndex((d) => safeStr(d.deviceId) === did);
 
             if (index === -1) {
+              ensureTopOrderForDevice(did);
+
               const created: Row = {
                 deviceId: did,
                 metadata: {},
@@ -529,7 +571,6 @@ export default function DevicesPage() {
           return;
         }
 
-        // Legacy: still handle "status" event for backward compat
         if (msg.event === "status") {
           const did = safeStr(msg.deviceId || msg?.data?.deviceId);
           if (!did) return;
@@ -539,6 +580,8 @@ export default function DevicesPage() {
             const index = prev.findIndex((d) => safeStr(d.deviceId) === did);
 
             if (index === -1) {
+              ensureTopOrderForDevice(did);
+
               const created: Row = {
                 deviceId: did,
                 metadata: {},
@@ -581,6 +624,7 @@ export default function DevicesPage() {
           if (!did) return;
 
           setDevices((prev) => prev.filter((d) => safeStr(d.deviceId) !== did));
+          removeStableOrderForDevice(did);
 
           setFavoritesMap((prev) => {
             const copy = { ...prev };
@@ -630,11 +674,10 @@ export default function DevicesPage() {
     return () => {
       off();
     };
-  }, [loadAll, loadDeletePasswordStatus]);
+  }, [ensureTopOrderForDevice, loadAll, loadDeletePasswordStatus, removeStableOrderForDevice]);
 
-  // ── CHANGED: DisplayRow uses reachability instead of online boolean ──
   const displayRows = useMemo<DisplayRow[]>(() => {
-    return devices.map((d) => {
+    const mapped = devices.map((d) => {
       const deviceId = safeStr(d.deviceId);
       const favoriteFlag = !!(favoritesMap[deviceId] ?? (d as any).favorite ?? d._fav);
       const lastSeenTs = pickLastSeenAt(d);
@@ -653,9 +696,14 @@ export default function DevicesPage() {
         logoSrc: pickDeviceLogo(d),
       };
     });
-  }, [devices, favoritesMap, latestFormMap]);
 
-  // ── CHANGED: filter "online" → responsive, "offline" → idle+unreachable ──
+    return mapped.sort((a, b) => {
+      const ao = getStableOrder(a.deviceId);
+      const bo = getStableOrder(b.deviceId);
+      return ao - bo;
+    });
+  }, [devices, favoritesMap, latestFormMap, getStableOrder]);
+
   const filtered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
 
@@ -803,6 +851,7 @@ export default function DevicesPage() {
         await deleteDevice(deviceId, trimmedPassword as any);
 
         setDevices((prev) => prev.filter((d) => d.deviceId !== deviceId));
+        removeStableOrderForDevice(deviceId);
 
         setFavoritesMap((m) => {
           const copy = { ...m };
@@ -834,7 +883,7 @@ export default function DevicesPage() {
         setDeletingDeviceId(null);
       }
     },
-    [closeDeleteModal, deletePasswordSet],
+    [closeDeleteModal, deletePasswordSet, removeStableOrderForDevice],
   );
 
   const handleDeleteDevice = useCallback(
@@ -1115,7 +1164,6 @@ export default function DevicesPage() {
         </SurfaceCard>
       </div>
 
-      {/* Delete modal — unchanged logic */}
       <Modal open={deleteModalOpen} onClose={closeDeleteModal} title={deleteModalMode === "change" ? "Change Delete Password" : "Enter Password to Delete Device"}>
         {deleteModalMode === "delete" ? (
           <form onSubmit={handleSubmitDelete} className="space-y-4">
