@@ -44,6 +44,7 @@ type DisplayRow = Row & {
   lastSeenLabel: string;
   lastForm: string;
   logoSrc: string;
+  renderKey: string;
 };
 
 const LIST_ROW_HEIGHT = 238;
@@ -428,10 +429,13 @@ export default function DevicesPage() {
   }, []);
 
   const mergeDevices = useCallback((list: any[], safeFav: Record<string, boolean>) => {
-    const normalized = (list || []).map((d: any) => {
-      const id = pickDeviceId(d) || "unknown";
-      return { ...d, deviceId: id, _fav: !!safeFav[id] } as Row;
-    });
+    const normalized = (list || [])
+      .map((d: any) => {
+        const id = pickDeviceId(d);
+        if (!id) return null;
+        return { ...d, deviceId: id, _fav: !!safeFav[id] } as Row;
+      })
+      .filter(Boolean) as Row[];
 
     return normalized;
   }, []);
@@ -677,25 +681,30 @@ export default function DevicesPage() {
   }, [ensureTopOrderForDevice, loadAll, loadDeletePasswordStatus, removeStableOrderForDevice]);
 
   const displayRows = useMemo<DisplayRow[]>(() => {
-    const mapped = devices.map((d) => {
-      const deviceId = safeStr(d.deviceId);
-      const favoriteFlag = !!(favoritesMap[deviceId] ?? (d as any).favorite ?? d._fav);
-      const lastSeenTs = pickLastSeenAt(d);
-      const reachability = computeReachability(lastSeenTs);
+    const mapped = devices
+      .map((d, index) => {
+        const deviceId = safeStr(d.deviceId);
+        if (!deviceId) return null;
 
-      return {
-        ...d,
-        deviceId,
-        brand: pickBrand(d),
-        model: pickModel(d),
-        reachability,
-        favoriteFlag,
-        lastSeenTs,
-        lastSeenLabel: formatLastSeen(lastSeenTs),
-        lastForm: latestFormMap[deviceId] ? summarizeForm(latestFormMap[deviceId]) : "No form submit",
-        logoSrc: pickDeviceLogo(d),
-      };
-    });
+        const favoriteFlag = !!(favoritesMap[deviceId] ?? (d as any).favorite ?? d._fav);
+        const lastSeenTs = pickLastSeenAt(d);
+        const reachability = computeReachability(lastSeenTs);
+
+        return {
+          ...d,
+          deviceId,
+          brand: pickBrand(d),
+          model: pickModel(d),
+          reachability,
+          favoriteFlag,
+          lastSeenTs,
+          lastSeenLabel: formatLastSeen(lastSeenTs),
+          lastForm: latestFormMap[deviceId] ? summarizeForm(latestFormMap[deviceId]) : "No form submit",
+          logoSrc: pickDeviceLogo(d),
+          renderKey: `${deviceId}__${index}`,
+        };
+      })
+      .filter(Boolean) as DisplayRow[];
 
     return mapped.sort((a, b) => {
       const ao = getStableOrder(a.deviceId);
@@ -1127,7 +1136,7 @@ export default function DevicesPage() {
 
                   return (
                     <div
-                      key={d.deviceId}
+                      key={d.renderKey}
                       className="mb-3"
                       style={shouldVirtualize ? { height: LIST_ROW_HEIGHT } : undefined}
                     >
