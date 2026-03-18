@@ -522,7 +522,16 @@ export default function DeviceDetailPage() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <button onClick={() => nav("/devices")} className="h-10 rounded-2xl border border-slate-200 bg-white px-4 text-slate-800 hover:bg-slate-50" type="button">Back</button>
+              <button
+                onClick={() => {
+                  if (window.history.length > 1) nav(-1);
+                  else nav("/devices");
+                }}
+                className="h-10 rounded-2xl border border-slate-200 bg-white px-4 text-slate-800 hover:bg-slate-50"
+                type="button"
+              >
+                Back
+              </button>
             </div>
           </div>
 
