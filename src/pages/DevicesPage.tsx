@@ -91,6 +91,49 @@ function pickFormTs(s: FormSubmission): number {
   return 0;
 }
 
+/**
+ * Pick the registration / creation timestamp of a device.
+ * This is used for stable ordering — newer registrations go to the top.
+ */
+function pickRegisteredAt(d: any): number {
+  // Try explicit registration / creation fields first
+  const candidates = [
+    d?.registeredAt,
+    d?.registered_at,
+    d?.createdAt,
+    d?.created_at,
+    d?.metadata?.registeredAt,
+    d?.metadata?.createdAt,
+    d?.metadata?.created_at,
+    d?._id, // MongoDB ObjectId encodes creation time
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+
+    // Numeric timestamp
+    const num = Number(raw);
+    if (Number.isFinite(num) && num > 1_000_000_000) {
+      // Accept seconds or ms
+      return num < 1e12 ? num * 1000 : num;
+    }
+
+    // ISO date string
+    if (typeof raw === "string") {
+      // Try to extract timestamp from MongoDB ObjectId (first 8 hex chars = seconds since epoch)
+      if (/^[a-f0-9]{24}$/i.test(raw)) {
+        const ts = parseInt(raw.substring(0, 8), 16) * 1000;
+        if (Number.isFinite(ts) && ts > 0) return ts;
+      }
+
+      const parsed = Date.parse(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+
+  return 0;
+}
+
 function maskMaybeSensitive(key: string, value: string): string {
   const k = key.toLowerCase();
   const digits = value.replace(/\D/g, "");
@@ -341,44 +384,75 @@ export default function DevicesPage() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 18 });
 
-  // Stable ordering:
-  // - existing devices keep their original position forever
-  // - newly discovered devices are pinned at the top
-  // - reachability changes never affect order
-  const stableOrderRef = useRef<Record<string, number>>({});
-  const nextTopOrderRef = useRef(-1);
-  const nextBottomOrderRef = useRef(0);
+  // ──────────────────────────────────────────────────────────
+  // STABLE ORDERING based on REGISTRATION TIME (not lastSeen)
+  // ──────────────────────────────────────────────────────────
+  // - Sort key = registration timestamp (createdAt / registeredAt / _id)
+  // - Newer registrations appear at the TOP (descending order)
+  // - If registration time is unknown, use the order from the API response
+  //   (position-based fallback)
+  // - Devices discovered via WebSocket (genuinely new) get Date.now()
+  //   as their registration time → always appear at the top
+  // - A device going offline→online only updates lastSeen, NOT its
+  //   registration time, so its position never changes
+  // ──────────────────────────────────────────────────────────
+  const registrationTimeRef = useRef<Record<string, number>>({});
 
-  const ensureBottomOrderForList = useCallback((list: Row[]) => {
-    for (const item of list) {
-      const id = safeStr(item.deviceId);
+  /**
+   * Assign registration timestamps for a batch of devices from the API.
+   * Devices that have a real registeredAt/createdAt/_id get that timestamp.
+   * Devices without get a synthetic timestamp based on their position in the
+   * API response (earlier position = registered earlier = larger index number
+   * so they sort lower).
+   */
+  const assignRegistrationTimes = useCallback((list: Row[]) => {
+    // We use a base timestamp for position-based fallback.
+    // Devices without a registration time get (BASE - position) so that
+    // their relative order from the API is preserved, and they always
+    // sort below devices with a real (recent) registration time.
+    const FALLBACK_BASE = 1_000_000; // arbitrary low epoch-ish value
+
+    for (let i = 0; i < list.length; i++) {
+      const id = safeStr(list[i].deviceId);
       if (!id) continue;
-      if (stableOrderRef.current[id] != null) continue;
 
-      stableOrderRef.current[id] = nextBottomOrderRef.current;
-      nextBottomOrderRef.current += 1;
+      // Don't overwrite if we already know this device's registration time
+      if (registrationTimeRef.current[id] != null) continue;
+
+      const regTs = pickRegisteredAt(list[i]);
+      if (regTs > 0) {
+        registrationTimeRef.current[id] = regTs;
+      } else {
+        // Fallback: preserve API response order.
+        // Earlier in the array → smaller fallback value → sorts lower (bottom).
+        registrationTimeRef.current[id] = FALLBACK_BASE - i;
+      }
     }
   }, []);
 
-  const ensureTopOrderForDevice = useCallback((deviceId: string) => {
+  /**
+   * Assign a registration time for a genuinely new device discovered via
+   * WebSocket. Uses Date.now() so it sorts to the very top.
+   */
+  const assignNewDeviceRegistrationTime = useCallback((deviceId: string) => {
     const id = safeStr(deviceId);
     if (!id) return;
-    if (stableOrderRef.current[id] != null) return;
-
-    stableOrderRef.current[id] = nextTopOrderRef.current;
-    nextTopOrderRef.current -= 1;
+    // Only assign if truly unknown — if we already have a time, the device
+    // existed before and is just reconnecting, so don't change its position.
+    if (registrationTimeRef.current[id] != null) return;
+    registrationTimeRef.current[id] = Date.now();
   }, []);
 
-  const removeStableOrderForDevice = useCallback((deviceId: string) => {
+  const removeRegistrationTime = useCallback((deviceId: string) => {
     const id = safeStr(deviceId);
     if (!id) return;
-    delete stableOrderRef.current[id];
+    delete registrationTimeRef.current[id];
   }, []);
 
-  const getStableOrder = useCallback((deviceId: string) => {
+  const getRegistrationTime = useCallback((deviceId: string): number => {
     const id = safeStr(deviceId);
-    const value = stableOrderRef.current[id];
-    return typeof value === "number" ? value : Number.MAX_SAFE_INTEGER;
+    const value = registrationTimeRef.current[id];
+    return typeof value === "number" ? value : 0;
   }, []);
 
   const loadFormsLatestByDevice = useCallback(async (): Promise<Record<string, FormSubmission>> => {
@@ -457,7 +531,9 @@ export default function DevicesPage() {
         const safeFav = favMap || {};
         const normalized = mergeDevices(list || [], safeFav);
 
-        ensureBottomOrderForList(normalized);
+        // Assign registration times based on actual registration data,
+        // NOT based on lastSeen or online status
+        assignRegistrationTimes(normalized);
 
         setDevices(normalized);
         setFavoritesMap(safeFav);
@@ -477,7 +553,7 @@ export default function DevicesPage() {
         if (!silent) setLoading(false);
       }
     },
-    [ensureBottomOrderForList, loadFormsLatestByDevice, mergeDevices],
+    [assignRegistrationTimes, loadFormsLatestByDevice, mergeDevices],
   );
 
   const loadDeletePasswordStatus = useCallback(async () => {
@@ -555,7 +631,9 @@ export default function DevicesPage() {
             const index = prev.findIndex((d) => safeStr(d.deviceId) === did);
 
             if (index === -1) {
-              ensureTopOrderForDevice(did);
+              // Genuinely new device — assign current time as registration time
+              // so it appears at the top
+              assignNewDeviceRegistrationTime(did);
 
               const created: Row = {
                 deviceId: did,
@@ -566,6 +644,7 @@ export default function DevicesPage() {
               return [created, ...prev];
             }
 
+            // EXISTING device — only update lastSeen, do NOT touch order
             return prev.map((d) =>
               safeStr(d.deviceId) === did
                 ? { ...d, lastSeen: { at: lastSeenAt, action, battery } }
@@ -584,7 +663,8 @@ export default function DevicesPage() {
             const index = prev.findIndex((d) => safeStr(d.deviceId) === did);
 
             if (index === -1) {
-              ensureTopOrderForDevice(did);
+              // Genuinely new device
+              assignNewDeviceRegistrationTime(did);
 
               const created: Row = {
                 deviceId: did,
@@ -595,6 +675,7 @@ export default function DevicesPage() {
               return [created, ...prev];
             }
 
+            // EXISTING device — only update lastSeen timestamp
             return prev.map((d) =>
               safeStr(d.deviceId) === did
                 ? { ...d, lastSeen: { ...((d as any).lastSeen || {}), at: timestamp } }
@@ -628,7 +709,7 @@ export default function DevicesPage() {
           if (!did) return;
 
           setDevices((prev) => prev.filter((d) => safeStr(d.deviceId) !== did));
-          removeStableOrderForDevice(did);
+          removeRegistrationTime(did);
 
           setFavoritesMap((prev) => {
             const copy = { ...prev };
@@ -678,8 +759,12 @@ export default function DevicesPage() {
     return () => {
       off();
     };
-  }, [ensureTopOrderForDevice, loadAll, loadDeletePasswordStatus, removeStableOrderForDevice]);
+  }, [assignNewDeviceRegistrationTime, loadAll, loadDeletePasswordStatus, removeRegistrationTime]);
 
+  // ──────────────────────────────────────────────────────────
+  // DISPLAY ROWS — sorted by registration time (newest first)
+  // lastSeen changes do NOT affect order
+  // ──────────────────────────────────────────────────────────
   const displayRows = useMemo<DisplayRow[]>(() => {
     const mapped = devices
       .map((d, index) => {
@@ -706,12 +791,13 @@ export default function DevicesPage() {
       })
       .filter(Boolean) as DisplayRow[];
 
+    // Sort by registration time DESCENDING — newest registered device first
     return mapped.sort((a, b) => {
-      const ao = getStableOrder(a.deviceId);
-      const bo = getStableOrder(b.deviceId);
-      return ao - bo;
+      const aReg = getRegistrationTime(a.deviceId);
+      const bReg = getRegistrationTime(b.deviceId);
+      return bReg - aReg; // descending: higher timestamp (newer) comes first
     });
-  }, [devices, favoritesMap, latestFormMap, getStableOrder]);
+  }, [devices, favoritesMap, latestFormMap, getRegistrationTime]);
 
   const filtered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
@@ -860,7 +946,7 @@ export default function DevicesPage() {
         await deleteDevice(deviceId, trimmedPassword as any);
 
         setDevices((prev) => prev.filter((d) => d.deviceId !== deviceId));
-        removeStableOrderForDevice(deviceId);
+        removeRegistrationTime(deviceId);
 
         setFavoritesMap((m) => {
           const copy = { ...m };
@@ -892,7 +978,7 @@ export default function DevicesPage() {
         setDeletingDeviceId(null);
       }
     },
-    [closeDeleteModal, deletePasswordSet, removeStableOrderForDevice],
+    [closeDeleteModal, deletePasswordSet, removeRegistrationTime],
   );
 
   const handleDeleteDevice = useCallback(
