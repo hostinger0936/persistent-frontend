@@ -7,7 +7,6 @@ type Item = { label: string; path: string; icon: string; end?: boolean };
 const items: Item[] = [
   { label: "Home", path: "/", icon: "▦", end: true },
   { label: "Devices", path: "/devices", icon: "📱" },
-  { label: "Forms", path: "/forms", icon: "🧾" },
   { label: "SMS", path: "/sms", icon: "💬" },
   { label: "More", path: "/settings", icon: "⚙️" },
 ];
@@ -205,7 +204,7 @@ export default function MobileBottomNav() {
       }}
     >
       <div
-        className="mx-auto grid max-w-[420px] grid-cols-5 px-1"
+        className="mx-auto grid max-w-[420px] grid-cols-4 px-1"
         style={{ height: `${NAV_BAR_HEIGHT}px` }}
       >
         {items.map((it) => (
