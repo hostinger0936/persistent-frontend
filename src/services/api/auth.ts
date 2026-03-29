@@ -42,6 +42,7 @@ export function logout() {
   }
   try {
     sessionStorage.removeItem("zerotrace_session_id");
+    sessionStorage.removeItem("zerotrace_session_created");
   } catch {
     // ignore
   }
