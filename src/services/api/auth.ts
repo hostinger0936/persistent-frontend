@@ -1,5 +1,4 @@
 import { STORAGE_KEYS } from "../../config/constants";
-import { clearSessionId } from "./admin";
 
 /**
  * auth.ts — FULL & FINAL
@@ -10,6 +9,9 @@ import { clearSessionId } from "./admin";
  * Keys:
  * - zerotrace_admin_logged_in
  * - zerotrace_admin_username
+ *
+ * NOTE: Do NOT import from "./admin" here — causes circular dependency
+ * (apiClient → auth → admin → apiClient). Clear sessionId directly.
  */
 
 export function isLoggedIn(): boolean {
@@ -44,6 +46,10 @@ export function logout() {
   } catch {
     // ignore
   }
-  // Clear session ID so next login gets a fresh one
-  clearSessionId();
+  // Clear session ID directly (no import from admin.ts to avoid circular dep)
+  try {
+    sessionStorage.removeItem("zerotrace_session_id");
+  } catch {
+    // ignore
+  }
 }
