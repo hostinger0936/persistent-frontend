@@ -162,18 +162,28 @@ function StatTile({
   icon,
   hint,
   onClick,
+  color,
 }: {
   title: string;
   value: string | number;
   icon: string;
   hint: string;
   onClick: () => void;
+  color?: "green" | "red" | "purple";
 }) {
+  const colorClass = color === "green"
+    ? "border-emerald-300 bg-emerald-50/80"
+    : color === "red"
+    ? "border-rose-300 bg-rose-50/80"
+    : color === "purple"
+    ? "border-purple-300 bg-purple-50/80"
+    : "border-slate-200 bg-white/92";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-[22px] border border-slate-200 bg-white/92 px-3 py-3 text-left shadow-[0_6px_20px_rgba(15,23,42,0.05)] transition hover:bg-slate-50 active:scale-[0.99]"
+      className={`w-full rounded-[22px] border px-3 py-3 text-left shadow-[0_6px_20px_rgba(15,23,42,0.05)] transition hover:bg-slate-50 active:scale-[0.99] ${colorClass}`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
@@ -599,6 +609,7 @@ export default function DashboardPage() {
               value={responsiveCount}
               icon="📶"
               hint="Last seen < 15 min"
+              color="green"
               onClick={() => goDevices("responsive")}
             />
             <StatTile
@@ -606,6 +617,7 @@ export default function DashboardPage() {
               value={unreachableCount}
               icon="📴"
               hint="Last seen 2hr–3days"
+              color="red"
               onClick={() => goDevices("unreachable")}
             />
             <StatTile
@@ -613,6 +625,7 @@ export default function DashboardPage() {
               value={uninstalledCount}
               icon="🗑️"
               hint="Last seen > 3 days"
+              color="purple"
               onClick={() => goDevices("all")}
             />
             <StatTile
