@@ -1,8 +1,6 @@
 // src/components/layout/Topbar.tsx
 import { useEffect, useState } from "react";
 import { logout, getLoggedInUser } from "../../services/api/auth";
-import { getOrCreateSessionId } from "../../services/api/admin";
-import wsService from "../../services/ws/wsService";
 import WsIndicator from "../misc/WsIndicator";
 
 function BrandLogo({ size = 40 }: { size?: number }) {
@@ -59,48 +57,6 @@ export default function Topbar() {
     const onStorage = () => setUsername(getLoggedInUser());
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  /* ═══════════════════════════════════════════
-     GLOBAL FORCE_LOGOUT HANDLER
-     ═══════════════════════════════════════════
-     When backend sends force_logout for this session:
-     - If sessionId matches this browser → actually logout
-     - If no sessionId (logout all / logout by device) → logout everyone
-  */
-  useEffect(() => {
-    wsService.connect();
-
-    const off = wsService.onMessage((msg) => {
-      try {
-        if (!msg) return;
-
-        // Handle force_logout
-        if (msg.type === "force_logout") {
-          const msgSessionId = String(msg.sessionId || msg?.data?.sessionId || "").trim();
-          const mySessionId = getOrCreateSessionId();
-
-          // If no sessionId in message → logout ALL (logout-all was triggered)
-          // If sessionId matches this browser → logout this browser
-          if (!msgSessionId || msgSessionId === mySessionId) {
-            console.log("[Topbar] force_logout received — logging out", {
-              msgSessionId: msgSessionId || "(all)",
-              mySessionId,
-            });
-            logout();
-            window.location.href = "/login";
-            return;
-          }
-
-          // Different sessionId — not for this browser, ignore
-          return;
-        }
-      } catch {
-        // ignore
-      }
-    });
-
-    return () => { off(); };
   }, []);
 
   return (
