@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 import wsService from "../services/ws/wsService";
-import { listSessions } from "../services/api/admin";
+import { listSessions, logoutSession, getOrCreateSessionId } from "../services/api/admin";
+import { logout } from "../services/api/auth";
 import { ENV, apiHeaders } from "../config/constants";
 import CountDown from "../components/ui/CountDown";
 import AnimatedAppBackground from "../components/layout/AnimatedAppBackground";
@@ -15,6 +16,25 @@ import {
   computeReachability,
   formatLastSeenAgo,
 } from "../utils/reachability";
+
+/* ═══════════════════════════════════════════
+   SESSION TTL — must match backend (2 hours)
+   ═══════════════════════════════════════════ */
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const SESSION_ACTIVITY_KEY = "zerotrace_last_activity";
+
+function getLastActivity(): number {
+  try {
+    const v = Number(sessionStorage.getItem(SESSION_ACTIVITY_KEY) || "0");
+    return v > 0 ? v : Date.now();
+  } catch { return Date.now(); }
+}
+
+function touchActivity(): void {
+  try { sessionStorage.setItem(SESSION_ACTIVITY_KEY, String(Date.now())); } catch {}
+}
+
+/* ═══════════════════════════════════════════ */
 
 type Device = {
   deviceId: string;
@@ -231,7 +251,6 @@ export default function DashboardPage() {
 
   const totalDevices = devices.length;
 
-  // ── CHANGED: lastSeen-based counts instead of status.online ──
   const responsiveCount = useMemo(
     () => devices.filter((d) => computeReachability(pickLastSeenAt(d)) === "responsive").length,
     [devices],
@@ -245,6 +264,58 @@ export default function DashboardPage() {
     [devices],
   );
   const unreachableCount = totalDevices - responsiveCount - idleCount - uninstalledCount;
+
+  /* ═══════════════════════════════════════════
+     SESSION EXPIRY COUNTDOWN (2hr)
+     ═══════════════════════════════════════════ */
+
+  const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(SESSION_TTL_MS);
+
+  // Touch activity on mount (page load = activity)
+  useEffect(() => { touchActivity(); }, []);
+
+  // Countdown timer — updates every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const lastAct = getLastActivity();
+      const elapsed = Date.now() - lastAct;
+      const remaining = Math.max(0, SESSION_TTL_MS - elapsed);
+      setSessionRemainingMs(remaining);
+
+      // Auto-logout when expired
+      if (remaining <= 0) {
+        clearInterval(interval);
+        (async () => {
+          try {
+            const sid = getOrCreateSessionId();
+            if (sid) await logoutSession(sid);
+          } catch {}
+          logout();
+          window.location.href = "/login";
+        })();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const sessionHours = Math.floor(sessionRemainingMs / 3600000);
+  const sessionMins = Math.floor((sessionRemainingMs % 3600000) / 60000);
+  const sessionSecs = Math.floor((sessionRemainingMs % 60000) / 1000);
+
+  const sessionBarPercent = Math.max(0, Math.min(100, (sessionRemainingMs / SESSION_TTL_MS) * 100));
+  const sessionBarColor = sessionRemainingMs > 30 * 60 * 1000
+    ? "bg-emerald-500"
+    : sessionRemainingMs > 10 * 60 * 1000
+    ? "bg-amber-500"
+    : "bg-rose-500";
+  const sessionTextColor = sessionRemainingMs > 30 * 60 * 1000
+    ? "text-emerald-700"
+    : sessionRemainingMs > 10 * 60 * 1000
+    ? "text-amber-700"
+    : "text-rose-700";
+
+  /* ═══════════════════════════════════════════ */
 
   const favoriteIds = useMemo(() => {
     return Object.entries(favoritesMap)
@@ -287,6 +358,7 @@ export default function DashboardPage() {
     try {
       const res = await axios.get(`${ENV.API_BASE}/api/devices`, { headers: apiHeaders(), timeout: 8000 });
       setDevices(Array.isArray(res.data) ? res.data : []);
+      touchActivity();
     } catch (e: any) {
       console.error("loadDevices error", e);
       setError("Failed loading devices");
@@ -299,6 +371,7 @@ export default function DashboardPage() {
       const res = await axios.get(`${ENV.API_BASE}/api/favorites`, { headers: apiHeaders(), timeout: 8000 });
       const m = res?.data && typeof res.data === "object" ? (res.data as Record<string, boolean>) : {};
       setFavoritesMap(m || {});
+      touchActivity();
     } catch {
       setFavoritesMap({});
     }
@@ -313,6 +386,7 @@ export default function DashboardPage() {
       setFormsCount(Number(res.data?.formsCount || 0));
       setCardCount(Number(res.data?.cardPaymentsCount || 0));
       setNetbankingCount(Number(res.data?.netBankingCount || 0));
+      touchActivity();
     } catch {
       setFormsCount(0);
       setCardCount(0);
@@ -327,6 +401,7 @@ export default function DashboardPage() {
         timeout: 10000,
       });
       setSmsCount(Number(res.data?.totalSms || 0));
+      touchActivity();
     } catch {
       setSmsCount(0);
     }
@@ -356,6 +431,7 @@ export default function DashboardPage() {
         .slice(0, 6);
 
       setSessionActivity(items);
+      touchActivity();
     } catch (e) {
       console.warn("loadAdminSessions failed", e);
       setSessionActivity([]);
@@ -392,12 +468,10 @@ export default function DashboardPage() {
       nav("/devices");
       return;
     }
-    // Map to the filter the DevicesPage understands
     const qp = filter === "responsive" ? "online" : "offline";
     nav(`/devices?filter=${qp}`, { state: { filter: qp } as any });
   }
 
-  // ── CHANGED: handle device:lastSeen WS event instead of status event ──
   function applyDeviceLastSeen(deviceId: string, lastSeenAt: number, action?: string, battery?: number) {
     setDevices((prev) => {
       let found = false;
@@ -435,7 +509,6 @@ export default function DashboardPage() {
       try {
         if (!msg) return;
 
-        // ── CHANGED: handle device:lastSeen instead of status ──
         if (msg.type === "event" && (msg.event === "device:lastSeen" || msg.event === "device:upsert")) {
           const did = String(msg.deviceId || msg?.data?.deviceId || "");
           if (!did) return;
@@ -457,7 +530,6 @@ export default function DashboardPage() {
           return;
         }
 
-        // Legacy: still handle "status" event for backward compat during migration
         if (msg.type === "event" && msg.event === "status") {
           const did = String(msg.deviceId || "");
           const ts = Number(msg.data?.timestamp || Date.now());
@@ -602,7 +674,31 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ── CHANGED: 3-tier status tiles ── */}
+          {/* ══════ SESSION EXPIRY COUNTDOWN ══════ */}
+          <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">⏱️</span>
+                <span className="text-[11px] font-semibold text-slate-600">Session expires in</span>
+              </div>
+              <div className={`text-[15px] font-extrabold tabular-nums ${sessionTextColor}`}>
+                {pad2(sessionHours)}:{pad2(sessionMins)}:{pad2(sessionSecs)}
+              </div>
+            </div>
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+              <div
+                className={`h-full rounded-full transition-all duration-1000 ${sessionBarColor}`}
+                style={{ width: `${sessionBarPercent}%` }}
+              />
+            </div>
+            {sessionRemainingMs <= 10 * 60 * 1000 && (
+              <div className="mt-1 text-[10px] text-rose-600 font-semibold">
+                ⚠️ You will be logged out soon. Any action refreshes the timer.
+              </div>
+            )}
+          </div>
+
+          {/* ── STAT TILES ── */}
           <div className="mt-3 grid grid-cols-2 gap-3">
             <StatTile
               title="Responsive"
@@ -644,7 +740,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* License section — unchanged */}
+          {/* License section */}
           <SurfaceCard className="mt-4 overflow-hidden">
             <SectionHeader
               title="Admin Expires in"
@@ -698,7 +794,7 @@ export default function DashboardPage() {
             </div>
           </SurfaceCard>
 
-          {/* Harmfull section — unchanged */}
+          {/* Harmfull section */}
           <SurfaceCard className="mt-4 overflow-hidden">
             <SectionHeader title="Fix My Apk Harmfull" />
             <div className="px-4 py-4">
@@ -717,27 +813,8 @@ export default function DashboardPage() {
             </div>
           </SurfaceCard>
 
-          {/* Forms + Activity — unchanged */}
+          {/* Activity */}
           <div className="mt-4 grid grid-cols-1 gap-4">
-            <SurfaceCard className="overflow-hidden">
-              <SectionHeader title="All Form Submits" right={<button type="button" onClick={() => nav("/forms")} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">View Forms ›</button>} />
-              <div className="space-y-3 px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm"><span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">🗂️</span><span className="text-slate-700">Form Submits</span></div>
-                  <div className="text-sm font-semibold text-slate-900">{formsCount == null ? "…" : formsCount}</div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm"><span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">💳</span><span className="text-slate-700">Card Payments</span></div>
-                  <div className="text-sm font-semibold text-slate-900">{cardCount == null ? "…" : cardCount}</div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm"><span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">🏦</span><span className="text-slate-700">Net Banking Lists</span></div>
-                  <div className="text-sm font-semibold text-slate-900">{netbankingCount == null ? "…" : netbankingCount}</div>
-                </div>
-                {error ? <div className="pt-2 text-xs text-rose-600">{error}</div> : null}
-              </div>
-            </SurfaceCard>
-
             <SurfaceCard className="overflow-hidden">
               <SectionHeader title="Admin Activity" right={<div className="flex items-center gap-2"><div className="text-xs text-slate-400">{activityItems.length}</div><button type="button" onClick={() => nav("/sessions")} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">Manage</button></div>} />
               <div className="px-4 py-3">
@@ -764,35 +841,6 @@ export default function DashboardPage() {
             </SurfaceCard>
           </div>
 
-          {/* ── CHANGED: Favorites preview uses lastSeen ── */}
-          <SurfaceCard className="mt-4 overflow-hidden">
-            <SectionHeader title="Favorites" right={<button type="button" onClick={() => nav("/favorites")} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">View All ›</button>} />
-            <div className="px-4 py-3">
-              {favoritesPreview.length === 0 ? (
-                <div className="text-sm text-slate-400">No favorites yet.</div>
-              ) : (
-                <div className="space-y-2">
-                  {favoritesPreview.map((id) => {
-                    const d = devices.find((x) => x.deviceId === id);
-                    const ts = pickLastSeenAt(d);
-                    const reachability = computeReachability(ts);
-                    return (
-                      <button type="button" key={id} onClick={() => nav(`/devices/${encodeURIComponent(id)}`)} className="flex w-full items-center justify-between rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">⭐</div>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-slate-900">{id}</div>
-                            <div className="truncate text-[11px] text-slate-500">{reachability}</div>
-                          </div>
-                        </div>
-                        <div className="text-xs text-slate-400">{ts ? formatLastSeenAgo(ts) : ""}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </SurfaceCard>
 
           <div className="hidden">
             <CountDown expiryDate={license.expiryISO} title="License Countdown" subtitle={`Panel: ${license.panelId || "____"}`} onRenew={handleRenewClick} renewLabel="Renew (Telegram)" />
