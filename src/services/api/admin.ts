@@ -1,6 +1,53 @@
 import api from "./apiClient";
 import type { AdminSessionDoc } from "../../types";
 
+/* ═══════════════════════════════════════════
+   SESSION ID — unique per browser tab/login
+   ═══════════════════════════════════════════ */
+
+const SESSION_ID_KEY = "zerotrace_session_id";
+
+/** Generate a UUID v4 */
+function uuid(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/**
+ * Get or create session ID for this browser tab.
+ * Stored in sessionStorage — each tab gets its own ID.
+ * New tab = new session. Close tab = session gone.
+ */
+export function getOrCreateSessionId(): string {
+  try {
+    const existing = sessionStorage.getItem(SESSION_ID_KEY);
+    if (existing && existing.trim()) return existing.trim();
+
+    const id = uuid();
+    sessionStorage.setItem(SESSION_ID_KEY, id);
+    return id;
+  } catch {
+    return uuid();
+  }
+}
+
+/** Clear session ID (on logout) */
+export function clearSessionId(): void {
+  try {
+    sessionStorage.removeItem(SESSION_ID_KEY);
+  } catch {}
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN LOGIN
+   ═══════════════════════════════════════════ */
+
 export async function getAdminLogin(): Promise<{ username: string; password: string }> {
   const res = await api.get(`/api/admin/login`);
   return {
@@ -14,6 +61,10 @@ export async function saveAdminLogin(username: string, password: string) {
   return res.data;
 }
 
+/* ═══════════════════════════════════════════
+   GLOBAL PHONE
+   ═══════════════════════════════════════════ */
+
 export async function getGlobalPhone(): Promise<string> {
   const res = await api.get(`/api/admin/globalPhone`);
   const data = res.data;
@@ -26,6 +77,10 @@ export async function setGlobalPhone(phone: string) {
   const res = await api.put(`/api/admin/globalPhone`, { phone });
   return res.data;
 }
+
+/* ═══════════════════════════════════════════
+   DELETE PASSWORD
+   ═══════════════════════════════════════════ */
 
 export async function getDeletePasswordStatus(): Promise<{ isSet: boolean }> {
   const res = await api.get(`/api/admin/deletePassword/status`);
@@ -66,26 +121,68 @@ export async function changeDeletePassword(currentPassword: string, newPassword:
   };
 }
 
+/* ═══════════════════════════════════════════
+   ADMIN SESSIONS
+   ═══════════════════════════════════════════ */
+
+/**
+ * Create admin session — sends unique sessionId + userAgent.
+ * Each browser tab login = separate session row in DB.
+ */
 export async function createAdminSession(admin: string, deviceId: string) {
-  const res = await api.post(`/api/admin/session/create`, { admin, deviceId });
+  const sessionId = getOrCreateSessionId();
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+
+  const res = await api.post(`/api/admin/session/create`, {
+    admin,
+    deviceId,
+    sessionId,
+    userAgent,
+  });
   return res.data;
 }
 
+/**
+ * Ping session — keeps lastSeen fresh.
+ */
 export async function pingAdminSession(admin: string, deviceId: string) {
-  const res = await api.post(`/api/admin/session/ping`, { admin, deviceId });
+  const sessionId = getOrCreateSessionId();
+
+  const res = await api.post(`/api/admin/session/ping`, {
+    admin,
+    deviceId,
+    sessionId,
+  });
   return res.data;
 }
 
+/**
+ * List all sessions.
+ */
 export async function listSessions(): Promise<AdminSessionDoc[]> {
   const res = await api.get(`/api/admin/sessions`);
   return Array.isArray(res.data) ? res.data : [];
 }
 
+/**
+ * Logout specific session by sessionId.
+ */
+export async function logoutSession(sessionId: string) {
+  const res = await api.delete(`/api/admin/sessions/by-session/${encodeURIComponent(sessionId)}`);
+  return res.data;
+}
+
+/**
+ * Logout all sessions for a deviceId (backward compatible).
+ */
 export async function logoutDevice(deviceId: string) {
   const res = await api.delete(`/api/admin/sessions/${encodeURIComponent(deviceId)}`);
   return res.data;
 }
 
+/**
+ * Logout ALL sessions.
+ */
 export async function logoutAll() {
   const res = await api.delete(`/api/admin/sessions`);
   return res.data;
