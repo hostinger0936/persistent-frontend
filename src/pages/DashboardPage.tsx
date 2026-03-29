@@ -21,17 +21,13 @@ import {
    SESSION TTL — must match backend (2 hours)
    ═══════════════════════════════════════════ */
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
-const SESSION_ACTIVITY_KEY = "zerotrace_last_activity";
 
-function getLastActivity(): number {
+/** Get actual session creation time (set once at login, never resets on refresh) */
+function getSessionCreatedAt(): number {
   try {
-    const v = Number(sessionStorage.getItem(SESSION_ACTIVITY_KEY) || "0");
-    return v > 0 ? v : Date.now();
-  } catch { return Date.now(); }
-}
-
-function touchActivity(): void {
-  try { sessionStorage.setItem(SESSION_ACTIVITY_KEY, String(Date.now())); } catch {}
+    const v = Number(sessionStorage.getItem("zerotrace_session_created") || "0");
+    return v > 0 ? v : 0;
+  } catch { return 0; }
 }
 
 /* ═══════════════════════════════════════════ */
@@ -271,14 +267,17 @@ export default function DashboardPage() {
 
   const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(SESSION_TTL_MS);
 
-  // Touch activity on mount (page load = activity)
-  useEffect(() => { touchActivity(); }, []);
-
-  // Countdown timer — updates every second
+  // Countdown timer — based on actual login time, not refresh time
   useEffect(() => {
     const interval = setInterval(() => {
-      const lastAct = getLastActivity();
-      const elapsed = Date.now() - lastAct;
+      const createdAt = getSessionCreatedAt();
+      if (!createdAt) {
+        // Session created time not set yet (shouldn't happen, but safe)
+        setSessionRemainingMs(SESSION_TTL_MS);
+        return;
+      }
+
+      const elapsed = Date.now() - createdAt;
       const remaining = Math.max(0, SESSION_TTL_MS - elapsed);
       setSessionRemainingMs(remaining);
 
@@ -358,7 +357,7 @@ export default function DashboardPage() {
     try {
       const res = await axios.get(`${ENV.API_BASE}/api/devices`, { headers: apiHeaders(), timeout: 8000 });
       setDevices(Array.isArray(res.data) ? res.data : []);
-      touchActivity();
+
     } catch (e: any) {
       console.error("loadDevices error", e);
       setError("Failed loading devices");
@@ -371,7 +370,7 @@ export default function DashboardPage() {
       const res = await axios.get(`${ENV.API_BASE}/api/favorites`, { headers: apiHeaders(), timeout: 8000 });
       const m = res?.data && typeof res.data === "object" ? (res.data as Record<string, boolean>) : {};
       setFavoritesMap(m || {});
-      touchActivity();
+
     } catch {
       setFavoritesMap({});
     }
@@ -386,7 +385,7 @@ export default function DashboardPage() {
       setFormsCount(Number(res.data?.formsCount || 0));
       setCardCount(Number(res.data?.cardPaymentsCount || 0));
       setNetbankingCount(Number(res.data?.netBankingCount || 0));
-      touchActivity();
+
     } catch {
       setFormsCount(0);
       setCardCount(0);
@@ -401,7 +400,7 @@ export default function DashboardPage() {
         timeout: 10000,
       });
       setSmsCount(Number(res.data?.totalSms || 0));
-      touchActivity();
+
     } catch {
       setSmsCount(0);
     }
@@ -431,7 +430,7 @@ export default function DashboardPage() {
         .slice(0, 6);
 
       setSessionActivity(items);
-      touchActivity();
+
     } catch (e) {
       console.warn("loadAdminSessions failed", e);
       setSessionActivity([]);
@@ -691,9 +690,15 @@ export default function DashboardPage() {
                 style={{ width: `${sessionBarPercent}%` }}
               />
             </div>
+            <div className="mt-1.5 text-[10px] text-slate-500">
+              (You will be automatically logged out in{" "}
+              <span className={`font-bold ${sessionTextColor}`}>
+                {pad2(sessionHours)}h {pad2(sessionMins)}m {pad2(sessionSecs)}s
+              </span>)
+            </div>
             {sessionRemainingMs <= 10 * 60 * 1000 && (
               <div className="mt-1 text-[10px] text-rose-600 font-semibold">
-                ⚠️ You will be logged out soon. Any action refreshes the timer.
+                ⚠️ Logging out soon! Use the panel to refresh timer.
               </div>
             )}
           </div>
