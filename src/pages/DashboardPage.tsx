@@ -231,8 +231,8 @@ export default function DashboardPage() {
     [devices],
   );
   const uninstalledCount = useMemo(
-    () => deferredDevices.filter((d) => computeReachability(pickLastSeenAt(d)) === "uninstalled").length,
-    [deferredDevices],
+    () => devices.filter((d) => computeReachability(pickLastSeenAt(d)) === "uninstalled").length,
+    [devices],
   );
   const unreachableCount = totalDevices - responsiveCount - idleCount - uninstalledCount;
 
