@@ -22,14 +22,6 @@ import {
    ═══════════════════════════════════════════ */
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-/** Get actual session creation time (set once at login, never resets on refresh) */
-function getSessionCreatedAt(): number {
-  try {
-    const v = Number(sessionStorage.getItem("zerotrace_session_created") || "0");
-    return v > 0 ? v : 0;
-  } catch { return 0; }
-}
-
 /* ═══════════════════════════════════════════ */
 
 type Device = {
@@ -263,21 +255,18 @@ export default function DashboardPage() {
 
   /* ═══════════════════════════════════════════
      SESSION EXPIRY COUNTDOWN (2hr)
+     Uses backend createdAt — never resets on refresh
      ═══════════════════════════════════════════ */
 
   const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(SESSION_TTL_MS);
+  const [sessionCreatedAt, setSessionCreatedAt] = useState<number>(0);
 
-  // Countdown timer — based on actual login time, not refresh time
+  // Countdown timer — based on backend createdAt, not local time
   useEffect(() => {
-    const interval = setInterval(() => {
-      const createdAt = getSessionCreatedAt();
-      if (!createdAt) {
-        // Session created time not set yet (shouldn't happen, but safe)
-        setSessionRemainingMs(SESSION_TTL_MS);
-        return;
-      }
+    if (!sessionCreatedAt) return; // wait until we fetch from backend
 
-      const elapsed = Date.now() - createdAt;
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - sessionCreatedAt;
       const remaining = Math.max(0, SESSION_TTL_MS - elapsed);
       setSessionRemainingMs(remaining);
 
@@ -296,7 +285,7 @@ export default function DashboardPage() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [sessionCreatedAt]);
 
   const sessionHours = Math.floor(sessionRemainingMs / 3600000);
   const sessionMins = Math.floor((sessionRemainingMs % 3600000) / 60000);
@@ -410,6 +399,16 @@ export default function DashboardPage() {
     try {
       const sessions = (await listSessions()) as any[];
       const arr: SessionLike[] = Array.isArray(sessions) ? sessions : [];
+
+      // Find MY session's createdAt for countdown timer
+      const mySessionId = getOrCreateSessionId();
+      if (mySessionId) {
+        const mySession = (sessions || []).find((s: any) => String(s.sessionId || "") === mySessionId);
+        if (mySession) {
+          const created = toTs(mySession.createdAt) || toTs(mySession.updatedAt) || 0;
+          if (created > 0) setSessionCreatedAt(created);
+        }
+      }
 
       const items: ActivityItem[] = arr
         .map((s) => {
