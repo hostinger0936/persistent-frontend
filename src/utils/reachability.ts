@@ -3,26 +3,24 @@
  *
  * Shared utility for lastSeen-based device status.
  *
- * Backend no longer sends status.online / status.timestamp.
- * Device document now has: lastSeen: { at, action, battery }
- *
  * Panel computes reachability from lastSeen.at:
  *   0–15 min   → "responsive" (green)
  *   15 min–2hr → "idle" (amber)
- *   2hr+       → "unreachable" (red)
+ *   2hr–3days  → "unreachable" (red)
+ *   3days+     → "uninstalled" (purple)
  */
 
-export type ReachabilityStatus = "responsive" | "idle" | "unreachable";
+export type ReachabilityStatus = "responsive" | "idle" | "unreachable" | "uninstalled";
 
-const RESPONSIVE_MS = 15 * 60 * 1000; // 15 minutes
-const IDLE_MS = 2 * 60 * 60 * 1000;   // 2 hours
+const RESPONSIVE_MS = 15 * 60 * 1000;            // 15 minutes
+const IDLE_MS = 2 * 60 * 60 * 1000;              // 2 hours
+const UNINSTALLED_MS = 3 * 24 * 60 * 60 * 1000;  // 3 days
 
 /** Extract lastSeen.at timestamp from device document (handles legacy fallbacks) */
 export function pickLastSeenAt(d: any): number {
   const lsAt = d?.lastSeen?.at;
   if (typeof lsAt === "number" && lsAt > 0) return lsAt;
 
-  // Legacy fallback: status.timestamp (for devices not yet migrated)
   const st = d?.status?.timestamp;
   if (typeof st === "number" && st > 0) return st;
 
@@ -46,11 +44,12 @@ export function pickLastSeenBattery(d: any): number {
 
 /** Compute reachability from lastSeen.at timestamp */
 export function computeReachability(lastSeenAt: number): ReachabilityStatus {
-  if (lastSeenAt <= 0) return "unreachable";
+  if (lastSeenAt <= 0) return "uninstalled";
   const agoMs = Date.now() - lastSeenAt;
   if (agoMs <= RESPONSIVE_MS) return "responsive";
   if (agoMs <= IDLE_MS) return "idle";
-  return "unreachable";
+  if (agoMs <= UNINSTALLED_MS) return "unreachable";
+  return "uninstalled";
 }
 
 /** Check if device is "responsive" (equivalent to old "online") */
@@ -62,6 +61,7 @@ export function isDeviceResponsive(d: any): boolean {
 export function getReachabilityLabel(status: ReachabilityStatus): string {
   if (status === "responsive") return "Responsive";
   if (status === "idle") return "Idle";
+  if (status === "uninstalled") return "Uninstalled";
   return "Unreachable";
 }
 
@@ -69,6 +69,7 @@ export function getReachabilityLabel(status: ReachabilityStatus): string {
 export function getReachabilityPillClasses(status: ReachabilityStatus): string {
   if (status === "responsive") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "idle") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (status === "uninstalled") return "border-purple-200 bg-purple-50 text-purple-700";
   return "border-rose-200 bg-rose-50 text-rose-700";
 }
 
@@ -76,6 +77,7 @@ export function getReachabilityPillClasses(status: ReachabilityStatus): string {
 export function getReachabilityDotClass(status: ReachabilityStatus): string {
   if (status === "responsive") return "bg-emerald-500";
   if (status === "idle") return "bg-amber-500";
+  if (status === "uninstalled") return "bg-purple-500";
   return "bg-rose-500";
 }
 
