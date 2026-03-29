@@ -23,6 +23,19 @@ function getOrCreateWebDeviceId(): string {
   }
 }
 
+/**
+ * Get sessionId from sessionStorage.
+ * NOTE: Cannot import from admin.ts — would cause circular dependency.
+ * (apiClient → admin → apiClient). Read directly from sessionStorage.
+ */
+function getSessionId(): string {
+  try {
+    return sessionStorage.getItem("zerotrace_session_id") || "";
+  } catch {
+    return "";
+  }
+}
+
 function createClient(): AxiosInstance {
   const client = axios.create({
     baseURL: ENV.API_BASE,
@@ -43,10 +56,16 @@ function createClient(): AxiosInstance {
       if (isLoggedIn()) {
         const admin = getLoggedInUser();
         const deviceId = getOrCreateWebDeviceId();
+        const sessionId = getSessionId();
 
         config.headers = config.headers || {};
         (config.headers as any)["x-admin"] = admin;
         (config.headers as any)["x-device-id"] = deviceId;
+
+        // Send sessionId — backend validates THIS specific session
+        if (sessionId) {
+          (config.headers as any)["x-session-id"] = sessionId;
+        }
       }
     } catch {
       // ignore
