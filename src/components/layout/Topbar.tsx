@@ -1,6 +1,7 @@
 // src/components/layout/Topbar.tsx
 import { useEffect, useState } from "react";
 import { logout, getLoggedInUser } from "../../services/api/auth";
+import { logoutSession, getOrCreateSessionId } from "../../services/api/admin";
 import WsIndicator from "../misc/WsIndicator";
 
 function BrandLogo({ size = 40 }: { size?: number }) {
@@ -59,6 +60,23 @@ export default function Topbar() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  async function handleSelfLogout() {
+    if (!confirm("Logout?")) return;
+
+    // Delete own session from DB first
+    try {
+      const mySessionId = getOrCreateSessionId();
+      if (mySessionId) {
+        await logoutSession(mySessionId);
+      }
+    } catch {
+      // ignore — still logout locally even if API fails
+    }
+
+    logout();
+    window.location.href = "/login";
+  }
+
   return (
     <header className="sticky top-0 z-[40] w-full border-b border-slate-200 bg-white/90 backdrop-blur-md">
       <div className="mx-auto max-w-[420px] px-3 py-3 md:max-w-none md:px-4">
@@ -100,11 +118,7 @@ export default function Topbar() {
               as="button"
               title="Logout"
               className="text-[12px] font-bold text-slate-700"
-              onClick={() => {
-                if (!confirm("Logout?")) return;
-                logout();
-                window.location.href = "/login";
-              }}
+              onClick={handleSelfLogout}
             >
               <span aria-hidden>⎋</span>
               <span className="hidden sm:inline">Logout</span>
