@@ -54,7 +54,6 @@ export type FormSubmissionDoc = {
   payload?: Record<string, any>;
   createdAt?: string;
   updatedAt?: string;
-  // backend returns transformed shape sometimes:
   phoneNumber?: string;
   username?: string;
   atmPin?: string;
@@ -102,8 +101,18 @@ export type CrashDoc = {
 
 export type AdminSessionDoc = {
   _id?: string;
+  /** Unique per login — UUID */
+  sessionId: string;
   admin: string;
   deviceId: string;
+  /** Raw User-Agent */
+  userAgent?: string;
+  /** Client IP */
+  ip?: string;
+  /** Parsed browser name e.g. "Chrome 120" */
+  browser?: string;
+  /** Parsed OS e.g. "Windows 10" */
+  os?: string;
   lastSeen: number;
   createdAt?: string;
   updatedAt?: string;
