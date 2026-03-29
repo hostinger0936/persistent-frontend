@@ -3,15 +3,9 @@ import { STORAGE_KEYS } from "../../config/constants";
 /**
  * auth.ts — FULL & FINAL
  *
- * This project uses simple localStorage-based session.
- * Backend login endpoints exist but do NOT return tokens.
- *
- * Keys:
- * - zerotrace_admin_logged_in
- * - zerotrace_admin_username
- *
- * NOTE: Do NOT import from "./admin" here — causes circular dependency
- * (apiClient → auth → admin → apiClient). Clear sessionId directly.
+ * CRITICAL: Do NOT import anything from "./admin" or "./apiClient" here.
+ * Circular dependency chain: apiClient → auth → admin → apiClient
+ * This will crash isLoggedIn() and break login protection entirely.
  */
 
 export function isLoggedIn(): boolean {
@@ -46,7 +40,6 @@ export function logout() {
   } catch {
     // ignore
   }
-  // Clear session ID directly (no import from admin.ts to avoid circular dep)
   try {
     sessionStorage.removeItem("zerotrace_session_id");
   } catch {
