@@ -1,4 +1,5 @@
 import { STORAGE_KEYS } from "../../config/constants";
+import { clearSessionId } from "./admin";
 
 /**
  * auth.ts — FULL & FINAL
@@ -43,4 +44,6 @@ export function logout() {
   } catch {
     // ignore
   }
+  // Clear session ID so next login gets a fresh one
+  clearSessionId();
 }
