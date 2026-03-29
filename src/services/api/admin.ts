@@ -140,13 +140,6 @@ export async function createAdminSession(admin: string, deviceId: string) {
     userAgent,
   });
 
-  // Store login time — used for session countdown (never reset on refresh)
-  try {
-    if (!sessionStorage.getItem("zerotrace_session_created")) {
-      sessionStorage.setItem("zerotrace_session_created", String(Date.now()));
-    }
-  } catch {}
-
   return res.data;
 }
 
