@@ -1197,9 +1197,9 @@ export default function DevicesPage() {
               ].join(" ")}
             >
               <option value="all">All</option>
-              <option value="online">Responsive</option>
+              <option value="online">Online</option>
               <option value="idle">Sleeping</option>
-              <option value="offline">Idle / Unreachable</option>
+              <option value="offline">Offline</option>
               <option value="uninstalled">Uninstalled</option>
               <option value="favorites">Favorites</option>
             </select>
