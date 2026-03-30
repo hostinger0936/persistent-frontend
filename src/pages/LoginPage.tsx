@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import AnimatedAppBackground from "../components/layout/AnimatedAppBackground";
 import ztLogo from "../assets/zt-logo.png";
 import { createAdminSession, getAdminLogin, saveAdminLogin } from "../services/api/admin";
-import { setLoggedIn } from "../services/api/auth";
+import { setLoggedIn, logout } from "../services/api/auth";
 import { STORAGE_KEYS } from "../config/constants";
 
 type ValidationResult = { ok: true; msg: "" } | { ok: false; msg: string };
@@ -52,93 +52,45 @@ function IconChannel(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function SurfaceCard({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+function SurfaceCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div
-      className={[
-        "rounded-[28px] border border-slate-200 bg-white/94 shadow-[0_10px_30px_rgba(15,23,42,0.08)]",
-        className,
-      ].join(" ")}
-    >
+    <div className={["rounded-[28px] border border-slate-200 bg-white/94 shadow-[0_10px_30px_rgba(15,23,42,0.08)]", className].join(" ")}>
       {children}
     </div>
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  icon,
-  autoFocus,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-  icon: "user" | "lock";
-  autoFocus?: boolean;
+function Field({ label, value, onChange, placeholder, type = "text", icon, autoFocus }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; icon: "user" | "lock"; autoFocus?: boolean;
 }) {
   const Icon = icon === "user" ? IconUser : IconLock;
-
   return (
     <div className="space-y-2">
       <label className="block text-[14px] font-semibold text-slate-800">{label}</label>
-
       <div className="relative">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-          <Icon className="h-5 w-5" />
-        </span>
-
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          type={type}
-          placeholder={placeholder}
-          autoFocus={autoFocus}
-          className={[
-            "h-11 w-full rounded-2xl border border-slate-200 bg-white pl-11 pr-4",
-            "text-slate-900 placeholder:text-slate-400",
-            "outline-none transition",
-            "focus:border-sky-300 focus:ring-2 focus:ring-sky-100",
-          ].join(" ")}
-        />
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Icon className="h-5 w-5" /></span>
+        <input value={value} onChange={(e) => onChange(e.target.value)} type={type} placeholder={placeholder} autoFocus={autoFocus}
+          className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100" />
       </div>
     </div>
   );
 }
 
-function safeStr(v: any) {
-  return (v ?? "").toString();
-}
+function safeStr(v: any) { return (v ?? "").toString(); }
 
 function getOrCreateWebDeviceId(): string {
   const KEY = "zerotrace_web_device_id";
   try {
     const existing = localStorage.getItem(KEY);
     if (existing && existing.trim()) return existing.trim();
-
     const counterKey = "zerotrace_web_device_counter";
     const nRaw = localStorage.getItem(counterKey);
     const n = Math.max(1, Number(nRaw || "1") || 1);
     const id = `device${n}`;
-
     localStorage.setItem(KEY, id);
     localStorage.setItem(counterKey, String(n + 1));
-
     return id;
-  } catch {
-    return `device${Math.floor(Math.random() * 10000)}`;
-  }
+  } catch { return `device${Math.floor(Math.random() * 10000)}`; }
 }
 
 const TELEGRAM_USERNAME = "ownerofcardhouse";
@@ -150,24 +102,14 @@ function openTelegramMessage(message: string) {
   const encoded = encodeURIComponent(message);
   const tgAppUrl = `tg://resolve?domain=${TELEGRAM_USERNAME}&text=${encoded}`;
   const tgWebUrl = `https://t.me/${TELEGRAM_USERNAME}?text=${encoded}`;
-
   try {
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isMobile) {
-      window.location.href = tgAppUrl;
-      setTimeout(() => {
-        window.open(tgWebUrl, "_blank", "noopener,noreferrer");
-      }, 500);
-      return;
-    }
+    if (isMobile) { window.location.href = tgAppUrl; setTimeout(() => { window.open(tgWebUrl, "_blank", "noopener,noreferrer"); }, 500); return; }
   } catch {}
-
   window.open(tgWebUrl, "_blank", "noopener,noreferrer");
 }
 
-function openTelegramChannel() {
-  window.open(TELEGRAM_CHANNEL_URL, "_blank", "noopener,noreferrer");
-}
+function openTelegramChannel() { window.open(TELEGRAM_CHANNEL_URL, "_blank", "noopener,noreferrer"); }
 
 export default function LoginPage() {
   const nav = useNavigate();
@@ -175,6 +117,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
 
   const [username, setUsername] = useState("");
@@ -188,58 +131,36 @@ export default function LoginPage() {
 
   useEffect(() => {
     let mounted = true;
-
     (async () => {
       try {
         const data = await getAdminLogin();
         if (!mounted) return;
-
         const u = safeStr(data?.username).trim();
         const p = safeStr(data?.password).trim();
-
-        setStoredUser(u);
-        setStoredPass(p);
-
+        setStoredUser(u); setStoredPass(p);
         if (u) setUsername(u);
         setPassword("");
-      } catch {
-        if (!mounted) return;
-        setStoredUser("");
-        setStoredPass("");
-        setPassword("");
-      } finally {
-        if (!mounted) return;
-        setLoading(false);
-      }
+      } catch { if (!mounted) return; setStoredUser(""); setStoredPass(""); setPassword(""); }
+      finally { if (!mounted) return; setLoading(false); }
     })();
-
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
-    function onDocClick() {
-      setContactOpen(false);
-    }
-
+    function onDocClick() { setContactOpen(false); }
     if (!contactOpen) return;
-
     document.addEventListener("click", onDocClick);
-    return () => {
-      document.removeEventListener("click", onDocClick);
-    };
+    return () => { document.removeEventListener("click", onDocClick); };
   }, [contactOpen]);
 
   const validate = useMemo(
-    () =>
-      (): ValidationResult => {
-        const u = (username || "").trim();
-        const p = (password || "").trim();
-        if (!u) return { ok: false, msg: "Username required" };
-        if (!p) return { ok: false, msg: "Password required" };
-        return { ok: true, msg: "" };
-      },
+    () => (): ValidationResult => {
+      const u = (username || "").trim();
+      const p = (password || "").trim();
+      if (!u) return { ok: false, msg: "Username required" };
+      if (!p) return { ok: false, msg: "Password required" };
+      return { ok: true, msg: "" };
+    },
     [username, password],
   );
 
@@ -253,7 +174,17 @@ export default function LoginPage() {
     try {
       const deviceId = getOrCreateWebDeviceId();
       await createAdminSession(adminUser, deviceId);
-    } catch {}
+    } catch (err: any) {
+      const errCode = String(err?.response?.data?.error || "").trim();
+
+      if (errCode === "limit_reached") {
+        // Undo login — session couldn't be created
+        logout();
+        setLimitReached(true);
+        setError(null);
+        return; // Don't navigate
+      }
+    }
 
     nav("/");
   }
@@ -261,74 +192,41 @@ export default function LoginPage() {
   async function handleSaveAndLogin(e?: React.FormEvent) {
     if (e) e.preventDefault();
     setError(null);
+    setLimitReached(false);
 
     const v = validate();
-    if (!v.ok) {
-      setError(v.msg);
-      return;
-    }
+    if (!v.ok) { setError(v.msg); return; }
 
     const u = username.trim();
     const p = password.trim();
-
     const hasStoredCreds = !!storedUser && !!storedPass;
 
     if (hasStoredCreds) {
-      const ok = u === storedUser && p === storedPass;
-      if (!ok) {
-        setError("Invalid username or password");
-        return;
-      }
-
+      if (u !== storedUser || p !== storedPass) { setError("Invalid username or password"); return; }
       setSaving(true);
-      try {
-        await afterSuccessfulLogin(u);
-      } finally {
-        setSaving(false);
-      }
+      try { await afterSuccessfulLogin(u); } finally { setSaving(false); }
       return;
     }
 
     setSaving(true);
     try {
       await saveAdminLogin(u, p);
-
-      setStoredUser(u);
-      setStoredPass(p);
-
+      setStoredUser(u); setStoredPass(p);
       await afterSuccessfulLogin(u);
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || "Server error";
       setError(String(msg));
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   function handleClear() {
-    try {
-      localStorage.removeItem(STORAGE_KEYS.LOGGED_IN);
-      localStorage.removeItem(STORAGE_KEYS.USERNAME);
-    } catch {}
-    setUsername(storedUser || "");
-    setPassword("");
-    setError(null);
+    try { localStorage.removeItem(STORAGE_KEYS.LOGGED_IN); localStorage.removeItem(STORAGE_KEYS.USERNAME); } catch {}
+    setUsername(storedUser || ""); setPassword(""); setError(null); setLimitReached(false);
   }
 
-  function handleContactHelp() {
-    setContactOpen(false);
-    openTelegramMessage(TELEGRAM_HELP_MESSAGE);
-  }
-
-  function handleContactOrder() {
-    setContactOpen(false);
-    openTelegramMessage(TELEGRAM_ORDER_MESSAGE);
-  }
-
-  function handleJoinChannel() {
-    setContactOpen(false);
-    openTelegramChannel();
-  }
+  function handleContactHelp() { setContactOpen(false); openTelegramMessage(TELEGRAM_HELP_MESSAGE); }
+  function handleContactOrder() { setContactOpen(false); openTelegramMessage(TELEGRAM_ORDER_MESSAGE); }
+  function handleJoinChannel() { setContactOpen(false); openTelegramChannel(); }
 
   return (
     <AnimatedAppBackground>
@@ -338,21 +236,13 @@ export default function LoginPage() {
             <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] sm:h-24 sm:w-24">
               <img src={ztLogo} alt="ZeroTrace" className="h-full w-full object-cover" draggable={false} />
             </div>
-
             <div className="text-left">
-              <div className="text-[36px] font-extrabold leading-none tracking-wide text-slate-900 sm:text-[40px]">
-                ZeroTrace
-              </div>
-              <div className="text-[16px] font-semibold tracking-wide text-slate-600 sm:text-[18px]">
-                Secure Admin Panel
-              </div>
+              <div className="text-[36px] font-extrabold leading-none tracking-wide text-slate-900 sm:text-[40px]">ZeroTrace</div>
+              <div className="text-[16px] font-semibold tracking-wide text-slate-600 sm:text-[18px]">Secure Admin Panel</div>
             </div>
           </div>
-
           <div className="mx-auto mt-4 h-[3px] w-[340px] max-w-[92%] rounded-full bg-gradient-to-r from-transparent via-sky-300 to-transparent" />
-          <div className="mt-4 text-[20px] font-semibold tracking-[0.12em] text-slate-700 sm:text-[22px]">
-            No Trace. No Limit
-          </div>
+          <div className="mt-4 text-[20px] font-semibold tracking-[0.12em] text-slate-700 sm:text-[22px]">No Trace. No Limit</div>
         </div>
 
         <div className="flex-1" />
@@ -363,127 +253,78 @@ export default function LoginPage() {
               <div className="py-10 text-center text-slate-500">Loading…</div>
             ) : (
               <form onSubmit={handleSaveAndLogin} className="space-y-4">
-                <Field
-                  label="Username"
-                  value={username}
-                  onChange={setUsername}
-                  placeholder="Enter your username"
-                  icon="user"
-                  autoFocus
-                />
-
-                <Field
-                  label="Password"
-                  value={password}
-                  onChange={setPassword}
-                  placeholder="Enter your password"
-                  type="password"
-                  icon="lock"
-                />
+                <Field label="Username" value={username} onChange={setUsername} placeholder="Enter your username" icon="user" autoFocus />
+                <Field label="Password" value={password} onChange={setPassword} placeholder="Enter your password" type="password" icon="lock" />
 
                 <label className="flex select-none items-center gap-3 pt-1 text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={useApiKey}
-                    onChange={(e) => setUseApiKey(e.target.checked)}
-                    className="h-5 w-5 rounded border-slate-300 bg-white text-sky-500 focus:ring-sky-200"
-                  />
+                  <input type="checkbox" checked={useApiKey} onChange={(e) => setUseApiKey(e.target.checked)} className="h-5 w-5 rounded border-slate-300 bg-white text-sky-500 focus:ring-sky-200" />
                   <span className="text-[15px]">Provide API key (optional)</span>
                 </label>
 
                 {useApiKey && (
                   <div className="space-y-2">
                     <label className="block text-[14px] font-semibold text-slate-800">API Key</label>
-
-                    <input
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="Paste API key here"
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
-                    />
-
+                    <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste API key here"
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100" />
                     <p className="text-[11px] text-slate-400">Stored locally in browser (localStorage).</p>
                   </div>
                 )}
 
-                {error && (
-                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-                    {error}
+                {/* ══════ LIMIT REACHED ERROR ══════ */}
+                {limitReached && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                    <div className="text-[14px] font-bold text-rose-700">⚠️ Maximum 5 devices allowed to login</div>
+                    <div className="mt-1 text-[12px] text-rose-600">
+                      Already 5 devices are logged in. No more logins allowed.
+                    </div>
+                    <div className="mt-2 text-[12px] text-slate-700">
+                      If you are the real owner of this panel and want to login, then{" "}
+                      <button type="button" onClick={handleContactHelp} className="font-bold text-sky-700 underline">
+                        contact the developer
+                      </button>{" "}
+                      because only the developer can increase the limit.
+                    </div>
                   </div>
                 )}
 
+                {error && !limitReached && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>
+                )}
+
                 <div className="grid grid-cols-[1fr_auto] gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="h-11 rounded-2xl border border-slate-900 bg-slate-900 text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  >
+                  <button type="submit" disabled={saving}
+                    className="h-11 rounded-2xl border border-slate-900 bg-slate-900 text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
                     {saving ? "Saving…" : storedUser && storedPass ? "Login" : "Save & Login"}
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={handleClear}
-                    className="h-11 rounded-2xl border border-slate-200 bg-white px-5 text-[15px] font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    Clear
-                  </button>
+                  <button type="button" onClick={handleClear}
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-5 text-[15px] font-semibold text-slate-700 hover:bg-slate-50">Clear</button>
                 </div>
 
                 <div className="pt-2 text-[12px] leading-relaxed text-slate-500">
-                  {storedUser && storedPass ? (
-                    <>Existing login is set on server. Enter the correct username/password to continue.</>
-                  ) : (
-                    <>No login found on server. First login will be saved as admin credentials.</>
-                  )}
+                  {storedUser && storedPass ? (<>Existing login is set on server. Enter the correct username/password to continue.</>) : (<>No login found on server. First login will be saved as admin credentials.</>)}
                 </div>
 
-                <div className="text-[11px] text-slate-400">
-                  Web Device ID: <b className="text-slate-700">{getOrCreateWebDeviceId()}</b>
-                </div>
+                <div className="text-[11px] text-slate-400">Web Device ID: <b className="text-slate-700">{getOrCreateWebDeviceId()}</b></div>
 
                 <div className="relative pt-3" onClick={(e) => e.stopPropagation()}>
                   {contactOpen && (
                     <div className="absolute bottom-[calc(100%+14px)] left-1/2 z-30 flex w-full max-w-[300px] -translate-x-1/2 flex-col items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={handleContactHelp}
-                        className="w-full rounded-2xl border border-sky-200 bg-white px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:bg-slate-50"
-                      >
+                      <button type="button" onClick={handleContactHelp} className="w-full rounded-2xl border border-sky-200 bg-white px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:bg-slate-50">
                         <div className="text-[14px] font-bold text-slate-900">Help Query</div>
                         <div className="mt-1 text-[12px] text-slate-500">Quick support on Telegram</div>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={handleContactOrder}
-                        className="w-full rounded-2xl border border-sky-200 bg-white px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:bg-slate-50"
-                      >
+                      <button type="button" onClick={handleContactOrder} className="w-full rounded-2xl border border-sky-200 bg-white px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:bg-slate-50">
                         <div className="text-[14px] font-bold text-slate-900">Order New APK / Service</div>
                         <div className="mt-1 text-[12px] text-slate-500">Send order request on Telegram</div>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={handleJoinChannel}
-                        className="flex w-full items-start gap-3 rounded-2xl border border-sky-200 bg-white px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:bg-slate-50"
-                      >
-                        <span className="mt-0.5 text-slate-700">
-                          <IconChannel className="h-5 w-5" />
-                        </span>
-                        <span className="block">
-                          <span className="block text-[14px] font-bold text-slate-900">Join Telegram Channel</span>
-                          <span className="mt-1 block text-[12px] text-slate-500">Get updates directly from the channel</span>
-                        </span>
+                      <button type="button" onClick={handleJoinChannel} className="flex w-full items-start gap-3 rounded-2xl border border-sky-200 bg-white px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:bg-slate-50">
+                        <span className="mt-0.5 text-slate-700"><IconChannel className="h-5 w-5" /></span>
+                        <span className="block"><span className="block text-[14px] font-bold text-slate-900">Join Telegram Channel</span><span className="mt-1 block text-[12px] text-slate-500">Get updates directly from the channel</span></span>
                       </button>
                     </div>
                   )}
-
-                  <button
-                    type="button"
-                    onClick={() => setContactOpen((v) => !v)}
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-[0_8px_24px_rgba(15,23,42,0.06)] hover:bg-slate-50"
-                  >
+                  <button type="button" onClick={() => setContactOpen((v) => !v)}
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-[0_8px_24px_rgba(15,23,42,0.06)] hover:bg-slate-50">
                     <IconTelegram className="h-5 w-5 text-slate-700" />
                     <span className="font-semibold">Contact Developer</span>
                   </button>
