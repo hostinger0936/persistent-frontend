@@ -24,13 +24,13 @@ function getOrCreateWebDeviceId(): string {
 }
 
 /**
- * Get sessionId from sessionStorage.
+ * Get sessionId from localStorage.
  * NOTE: Cannot import from admin.ts — would cause circular dependency.
- * (apiClient → admin → apiClient). Read directly from sessionStorage.
+ * (apiClient → admin → apiClient). Read directly from localStorage.
  */
 function getSessionId(): string {
   try {
-    return sessionStorage.getItem("zerotrace_session_id") || "";
+    return localStorage.getItem("zerotrace_session_id") || "";
   } catch {
     return "";
   }
