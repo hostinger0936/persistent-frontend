@@ -21,16 +21,16 @@ function uuid(): string {
 
 /**
  * Get or create session ID for this browser tab.
- * Stored in sessionStorage — each tab gets its own ID.
- * New tab = new session. Close tab = session gone.
+ * Stored in localStorage — shared across all tabs.
+ * 1 browser = 1 sessionId. Different browser/device = different session.
  */
 export function getOrCreateSessionId(): string {
   try {
-    const existing = sessionStorage.getItem(SESSION_ID_KEY);
+    const existing = localStorage.getItem(SESSION_ID_KEY);
     if (existing && existing.trim()) return existing.trim();
 
     const id = uuid();
-    sessionStorage.setItem(SESSION_ID_KEY, id);
+    localStorage.setItem(SESSION_ID_KEY, id);
     return id;
   } catch {
     return uuid();
@@ -40,7 +40,7 @@ export function getOrCreateSessionId(): string {
 /** Clear session ID (on logout) */
 export function clearSessionId(): void {
   try {
-    sessionStorage.removeItem(SESSION_ID_KEY);
+    localStorage.removeItem(SESSION_ID_KEY);
   } catch {}
 }
 
