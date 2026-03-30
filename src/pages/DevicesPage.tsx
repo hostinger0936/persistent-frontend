@@ -384,61 +384,35 @@ export default function DevicesPage() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 18 });
 
+  // ── CHANGE 1: ref to track scroll restoration ──
+  const scrollRestoredRef = useRef(false);
+
   // ──────────────────────────────────────────────────────────
   // STABLE ORDERING based on REGISTRATION TIME (not lastSeen)
   // ──────────────────────────────────────────────────────────
-  // - Sort key = registration timestamp (createdAt / registeredAt / _id)
-  // - Newer registrations appear at the TOP (descending order)
-  // - If registration time is unknown, use the order from the API response
-  //   (position-based fallback)
-  // - Devices discovered via WebSocket (genuinely new) get Date.now()
-  //   as their registration time → always appear at the top
-  // - A device going offline→online only updates lastSeen, NOT its
-  //   registration time, so its position never changes
-  // ──────────────────────────────────────────────────────────
   const registrationTimeRef = useRef<Record<string, number>>({});
 
-  /**
-   * Assign registration timestamps for a batch of devices from the API.
-   * Devices that have a real registeredAt/createdAt/_id get that timestamp.
-   * Devices without get a synthetic timestamp based on their position in the
-   * API response (earlier position = registered earlier = larger index number
-   * so they sort lower).
-   */
   const assignRegistrationTimes = useCallback((list: Row[]) => {
-    // We use a base timestamp for position-based fallback.
-    // Devices without a registration time get (BASE - position) so that
-    // their relative order from the API is preserved, and they always
-    // sort below devices with a real (recent) registration time.
-    const FALLBACK_BASE = 1_000_000; // arbitrary low epoch-ish value
+    const FALLBACK_BASE = 1_000_000;
 
     for (let i = 0; i < list.length; i++) {
       const id = safeStr(list[i].deviceId);
       if (!id) continue;
 
-      // Don't overwrite if we already know this device's registration time
       if (registrationTimeRef.current[id] != null) continue;
 
       const regTs = pickRegisteredAt(list[i]);
       if (regTs > 0) {
         registrationTimeRef.current[id] = regTs;
       } else {
-        // Fallback: preserve API response order.
-        // Earlier in the array → smaller fallback value → sorts lower (bottom).
         registrationTimeRef.current[id] = FALLBACK_BASE - i;
       }
     }
   }, []);
 
-  /**
-   * Assign a registration time for a genuinely new device discovered via
-   * WebSocket. Uses Date.now() so it sorts to the very top.
-   */
   const assignNewDeviceRegistrationTime = useCallback((deviceId: string) => {
     const id = safeStr(deviceId);
     if (!id) return;
-    // Only assign if truly unknown — if we already have a time, the device
-    // existed before and is just reconnecting, so don't change its position.
     if (registrationTimeRef.current[id] != null) return;
     registrationTimeRef.current[id] = Date.now();
   }, []);
@@ -531,8 +505,6 @@ export default function DevicesPage() {
         const safeFav = favMap || {};
         const normalized = mergeDevices(list || [], safeFav);
 
-        // Assign registration times based on actual registration data,
-        // NOT based on lastSeen or online status
         assignRegistrationTimes(normalized);
 
         setDevices(normalized);
@@ -631,8 +603,6 @@ export default function DevicesPage() {
             const index = prev.findIndex((d) => safeStr(d.deviceId) === did);
 
             if (index === -1) {
-              // Genuinely new device — assign current time as registration time
-              // so it appears at the top
               assignNewDeviceRegistrationTime(did);
 
               const created: Row = {
@@ -644,7 +614,6 @@ export default function DevicesPage() {
               return [created, ...prev];
             }
 
-            // EXISTING device — only update lastSeen, do NOT touch order
             return prev.map((d) =>
               safeStr(d.deviceId) === did
                 ? { ...d, lastSeen: { at: lastSeenAt, action, battery } }
@@ -663,7 +632,6 @@ export default function DevicesPage() {
             const index = prev.findIndex((d) => safeStr(d.deviceId) === did);
 
             if (index === -1) {
-              // Genuinely new device
               assignNewDeviceRegistrationTime(did);
 
               const created: Row = {
@@ -675,7 +643,6 @@ export default function DevicesPage() {
               return [created, ...prev];
             }
 
-            // EXISTING device — only update lastSeen timestamp
             return prev.map((d) =>
               safeStr(d.deviceId) === did
                 ? { ...d, lastSeen: { ...((d as any).lastSeen || {}), at: timestamp } }
@@ -761,10 +728,13 @@ export default function DevicesPage() {
     };
   }, [assignNewDeviceRegistrationTime, loadAll, loadDeletePasswordStatus, removeRegistrationTime]);
 
-  // ──────────────────────────────────────────────────────────
-  // DISPLAY ROWS — sorted by registration time (newest first)
-  // lastSeen changes do NOT affect order
-  // ──────────────────────────────────────────────────────────
+  // ── CHANGE 3: Save scroll position when component unmounts (covers mobile back button) ──
+  useEffect(() => {
+    return () => {
+      sessionStorage.setItem("devices_scroll_y", String(window.scrollY));
+    };
+  }, []);
+
   const displayRows = useMemo<DisplayRow[]>(() => {
     const mapped = devices
       .map((d, index) => {
@@ -791,11 +761,10 @@ export default function DevicesPage() {
       })
       .filter(Boolean) as DisplayRow[];
 
-    // Sort by registration time DESCENDING — newest registered device first
     return mapped.sort((a, b) => {
       const aReg = getRegistrationTime(a.deviceId);
       const bReg = getRegistrationTime(b.deviceId);
-      return bReg - aReg; // descending: higher timestamp (newer) comes first
+      return bReg - aReg;
     });
   }, [devices, favoritesMap, latestFormMap, getRegistrationTime]);
 
@@ -816,6 +785,25 @@ export default function DevicesPage() {
       );
     });
   }, [displayRows, deferredSearch, filter]);
+
+  // ── CHANGE 4: Restore scroll position after devices load and list renders ──
+  useEffect(() => {
+    if (loading || filtered.length === 0) return;
+    if (scrollRestoredRef.current) return;
+    scrollRestoredRef.current = true;
+
+    const saved = sessionStorage.getItem("devices_scroll_y");
+    sessionStorage.removeItem("devices_scroll_y");
+    if (!saved) return;
+
+    const y = Number(saved);
+    if (!Number.isFinite(y) || y <= 0) return;
+
+    // Wait for DOM to paint the list, then scroll
+    requestAnimationFrame(() => {
+      window.scrollTo(0, y);
+    });
+  }, [loading, filtered.length]);
 
   const shouldVirtualize = filtered.length > VIRTUALIZE_AFTER;
 
@@ -881,8 +869,10 @@ export default function DevicesPage() {
     [searchParams, setSearchParams],
   );
 
+  // ── CHANGE 2: Save scroll position before navigating to device detail ──
   const handleOpen = useCallback(
     (deviceId: string) => {
+      sessionStorage.setItem("devices_scroll_y", String(window.scrollY));
       nav(`/devices/${encodeURIComponent(deviceId)}`);
     },
     [nav],
