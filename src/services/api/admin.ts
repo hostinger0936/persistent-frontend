@@ -188,3 +188,27 @@ export async function logoutAll() {
   const res = await api.delete(`/api/admin/sessions`);
   return res.data;
 }
+
+/* ═══════════════════════════════════════════
+   SESSION LIMIT
+   ═══════════════════════════════════════════ */
+
+export async function getSessionLimit(): Promise<{ limit: number; currentCount: number }> {
+  const res = await api.get(`/api/admin/session/limit`);
+  return {
+    limit: Number(res.data?.limit || 5),
+    currentCount: Number(res.data?.currentCount || 0),
+  };
+}
+
+export async function updateSessionLimit(limit: number, securityCode: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await api.put(`/api/admin/session/limit`, { limit, securityCode });
+    return { success: !!res.data?.success };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.response?.data?.error || err?.message || "Failed",
+    };
+  }
+}
