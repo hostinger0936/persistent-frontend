@@ -461,11 +461,10 @@ export default function DashboardPage() {
     setRealtimeActivity((prev) => [next, ...prev].slice(0, 6));
   }
 
-  function goDevices(filter: "all" | "responsive" | "unreachable") {
-    if (filter === "all") {
-      nav("/devices");
-      return;
-    }
+  function goDevices(filter: "all" | "responsive" | "unreachable" | "idle" | "uninstalled") {
+    if (filter === "all") { nav("/devices"); return; }
+    if (filter === "idle") { nav("/devices?filter=idle"); return; }
+    if (filter === "uninstalled") { nav("/devices?filter=uninstalled"); return; }
     const qp = filter === "responsive" ? "online" : "offline";
     nav(`/devices?filter=${qp}`, { state: { filter: qp } as any });
   }
@@ -713,6 +712,13 @@ export default function DashboardPage() {
               onClick={() => goDevices("responsive")}
             />
             <StatTile
+              title="Sleeping Devices"
+              value={idleCount}
+              icon="😴"
+              hint="Last seen 15min–2hr"
+              onClick={() => goDevices("idle")}
+            />
+            <StatTile
               title="Unreachable"
               value={unreachableCount}
               icon="📴"
@@ -726,7 +732,7 @@ export default function DashboardPage() {
               icon="🗑️"
               hint="Last seen > 3 days"
               color="purple"
-              onClick={() => goDevices("all")}
+              onClick={() => goDevices("uninstalled")}
             />
             <StatTile
               title="Total Devices"
