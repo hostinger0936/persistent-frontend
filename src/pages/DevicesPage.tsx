@@ -32,7 +32,7 @@ import {
 
 type Row = DeviceDoc & { _fav?: boolean };
 type FormSubmission = Record<string, any>;
-type DeviceFilter = "all" | "online" | "offline" | "favorites";
+type DeviceFilter = "all" | "online" | "offline" | "favorites" | "idle" | "uninstalled";
 type DeleteModalMode = "delete" | "change";
 
 type DisplayRow = Row & {
@@ -56,7 +56,7 @@ function safeStr(v: unknown): string {
 }
 
 function normalizeFilter(v: string | null | undefined): DeviceFilter {
-  if (v === "online" || v === "offline" || v === "favorites") return v;
+  if (v === "online" || v === "offline" || v === "favorites" || v === "idle" || v === "uninstalled") return v;
   return "all";
 }
 
@@ -805,6 +805,8 @@ export default function DevicesPage() {
     return displayRows.filter((d) => {
       if (filter === "online" && d.reachability !== "responsive") return false;
       if (filter === "offline" && d.reachability === "responsive") return false;
+      if (filter === "idle" && d.reachability !== "idle") return false;
+      if (filter === "uninstalled" && d.reachability !== "uninstalled") return false;
       if (filter === "favorites" && !d.favoriteFlag) return false;
 
       if (!q) return true;
@@ -1196,7 +1198,9 @@ export default function DevicesPage() {
             >
               <option value="all">All</option>
               <option value="online">Responsive</option>
+              <option value="idle">Sleeping</option>
               <option value="offline">Idle / Unreachable</option>
+              <option value="uninstalled">Uninstalled</option>
               <option value="favorites">Favorites</option>
             </select>
           </div>
