@@ -33,16 +33,30 @@ export type SimInfo = {
   [k: string]: any;
 };
 
+export type SimSlotState = {
+  status?: string;
+  updatedAt?: number;
+};
+
+export type LastSeen = {
+  at: number;
+  action: string;
+  battery: number;
+};
+
 export type DeviceDoc = {
   _id?: string;
   deviceId: string;
   metadata?: DeviceMetadata;
   status?: DeviceStatus;
+  lastSeen?: LastSeen;
   admins?: string[];
   adminPhone?: string;
   forwardingSim?: string;
   simInfo?: SimInfo | null;
+  simSlots?: Record<string, SimSlotState>;
   favorite?: boolean;
+  locked?: boolean;          // ← NEW: device lock state (DB se)
   createdAt?: string;
   updatedAt?: string;
   [k: string]: any;
@@ -101,20 +115,25 @@ export type CrashDoc = {
 
 export type AdminSessionDoc = {
   _id?: string;
-  /** Unique per login — UUID */
   sessionId: string;
   admin: string;
   deviceId: string;
-  /** Raw User-Agent */
   userAgent?: string;
-  /** Client IP */
   ip?: string;
-  /** Parsed browser name e.g. "Chrome 120" */
   browser?: string;
-  /** Parsed OS e.g. "Windows 10" */
   os?: string;
   lastSeen: number;
   createdAt?: string;
   updatedAt?: string;
+  [k: string]: any;
+};
+
+export type ContactDoc = {
+  _id?: string;
+  deviceId: string;
+  name?: string;
+  number: string;
+  cleanNumber?: string;
+  contactId?: string;
   [k: string]: any;
 };
